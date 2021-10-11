@@ -5,11 +5,7 @@
 * Computer Graphics
 */
 
-/*
-* NOTES:
-* Rotation - Using Angle Sum Identities=>x’ = xcosθ−ysinθ , y’ = xsinθ+ycosθ
-* This Program rotates the letter in X-Y plane
-*/
+
 // 4-ColorfulLetter.cpp: draw multiple triangles to form a colorful letter
 
 #include <glad.h>
@@ -17,6 +13,7 @@
 #include <stdio.h>
 #include "GLXtras.h"
 #include <vector>
+#include <VecMat.h>
 
 // shader program
 
@@ -26,23 +23,22 @@ GLuint program = 0; // GLSL program ID, valid if > 0
 time_t startTime = clock();
 static float degPerSec = 30;
 
-
 const char* vertexShader = R"(
 	#version 130
 	in vec2 point;
-	in vec3 color;
-	out vec4 vColor;
-	uniform float radAng = 0;
-	//uniform float scale = 1;
-	vec2 Rotate2D(vec2 v) {
-		float c = cos(radAng), s = sin(radAng);
-		//return scale*vec2(c*v.x-s*v.y, s*v.x+c*v.y);
-           return vec2(c*v.x-s*v.y, s*v.x+c*v.y);
-		
-}
+    in vec3 color;
+    out vec4 vColor;
+uniform mat4 m;
+uniform float radAng = 0;
+	
+	//in vec3 color;
+	//out vec4 vColor;
+    uniform mat4 view;
+
+
+
 	void main() {
-		vec2 r = Rotate2D(point);
-		gl_Position = vec4(r, 0, 1);
+		gl_Position = view*vec4(point, 0, 1);
 		vColor = vec4(color, 1);
 	}
 )";
@@ -61,6 +57,11 @@ float points[][2] = { {-.15f, .125f},{-.15f, -.75f}, {-.5f, -.75f}, {-.5f,   .75
 						 {.38f,   .35f}, {.23f, .125f}, {.5f,  -.125f}, {.5f,  -.5f}, {.25f, -.75f} };
 float colors[][3] = { {1, 1, 1}, {1, 0, 0}, {.5f, 0, 0}, {1, 1, 0}, {.5f, 1, 0},
 						 {0, 1, 0}, {0, 1, 1}, {0,   0, 1}, {1, 0, 1}, {.5f, 0, .5f} };
+
+//float colors[][3] = { {0,0,0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
+	//					 {0, 0, 0}, {0, 0, 0}, {0,0, 0}, {0, 0, 0}, {0, 0,0} };
+
+
 int triangles[][3] = { {0, 1, 2}, {0, 2, 3}, {0, 3, 4}, {0, 4, 5},
 						  {0, 5, 6}, {0, 6, 7}, {0, 7, 8}, {0, 8, 9}, {0, 9, 10} };
 
@@ -90,12 +91,14 @@ void InitVertexBuffer() {
 // display
 
 void Display() {
-	// clear screen to grey
-
+	
 	float dt = (float)(clock() - startTime) / CLOCKS_PER_SEC;
 	SetUniform(program, "radAng", (3.1415f / 180.f) * dt * degPerSec);
 
-
+	mat4 m = RotateZ(30*dt);
+	SetUniform(program,"view",m);
+	
+	// clear screen to grey
 	glClearColor(.5f, .5f, .5f, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glUseProgram(program);
