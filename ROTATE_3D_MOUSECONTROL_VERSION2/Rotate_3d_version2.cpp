@@ -1,12 +1,12 @@
-﻿/*
+/*
 * Author:Raviteja Poosala
 * Seattle University
-* Date:10/3/2021
+* Date:10/11/2021
 * Computer Graphics
 */
 
 
-//  rotating letter based on matrix transformation 
+// 4-ColorfulLetter.cpp: draw multiple triangles to form a colorful letter controls
 
 #include <glad.h>
 #include <GLFW/glfw3.h>
@@ -20,6 +20,9 @@
 GLuint vBuffer = 0; // GPU vertex buffer ID, valid if > 0
 GLuint program = 0; // GLSL program ID, valid if > 0
 
+
+
+
 time_t startTime = clock();
 static float degPerSec = 30;
 
@@ -28,12 +31,13 @@ const char* vertexShader = R"(
 	in vec2 point;
     in vec3 color;
     out vec4 vColor;
+    uniform mat4 view;
 uniform mat4 m;
 uniform float radAng = 0;
 	
 	//in vec3 color;
 	//out vec4 vColor;
-    uniform mat4 view;
+    
 
 
 
@@ -88,24 +92,94 @@ void InitVertexBuffer() {
 	glBufferSubData(GL_ARRAY_BUFFER, vsize, csize, colors);
 }
 
+
+
+/*Mouse Control events
+* To control rotations b/w X-Y we are defining below variables and functions
+*/
+
+//new variables
+vec2  mouseDown;            // reference for mouse drag
+vec2  rotOld, rotNew;       // .x is rotation about Y-axis, .y about X-axis
+float rotZ = 0;
+vec2  tranOld, tranNew;
+float rotSpeed = .3f;
+float tranSpeed = .01f;
+
+void MouseWheel(GLFWwindow* w, double ignore, double spin) {
+	rotZ += (spin > 0 ? 1 : -1) * 2.5f;
+}
+
+
+//button call backs
+void MouseButton(GLFWwindow* w, int butn, int action, int mods) {
+	// called when mouse button pressed or released
+	if (action == GLFW_PRESS) {
+		double x, y;
+		glfwGetCursorPos(w, &x, &y);
+		mouseDown = vec2((float)x, (float)y); // save reference for MouseDrag
+	}
+	if (action == GLFW_RELEASE) {
+		rotOld = rotNew;                        // save reference for MouseDrag
+		tranOld = tranNew;
+	}
+}
+
+/*
+void MouseMove(GLFWwindow* w, double x, double y) {
+	if (glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) { // drag
+		// find mouse drag difference
+		vec2 dif((float)x - mouseDown.x, (float)y - mouseDown.y);
+
+		rotNew = rotOld + rotSpeed * dif;                       // rotate
+	}
+}
+*/
+
+void MouseMove(GLFWwindow* w, double x, double y) {
+	if (glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) { // drag
+		// find mouse drag difference
+		vec2 mouse((float)x, (float)y), dif = mouse - mouseDown;
+		bool shift = glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+			glfwGetKey(w, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+		if (shift)
+			tranNew = tranOld + tranSpeed * vec2(dif.x, -dif.y);    // SHIFT key: translate
+		else
+			rotNew = rotOld + rotSpeed * dif;                       // rotate
+	}
+}
+
+
+
 // display
 
 void Display() {
-	
-	float dt = (float)(clock() - startTime) / CLOCKS_PER_SEC;
-	SetUniform(program, "radAng", (3.1415f / 180.f) * dt * degPerSec);
 
-	mat4 m = RotateZ(30*dt);
-	SetUniform(program,"view",m);
 	
+	//mat4 m = RotateZ(30 * dt);
+	//SetUniform(program, "view", m);
+
 	// clear screen to grey
-	glClearColor(.5f, .5f, .5f, 1);
+	glClearColor(.5, .5, .5, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
+	// enable z-buffer (needed for tetrahedron)
+	glClear(GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+
 	glUseProgram(program);
 	// establish vertex fetch for point and for color, then draw triangles
 	int vsize = sizeof(points), ntris = sizeof(triangles) / (3 * sizeof(int));
 	VertexAttribPointer(program, "point", 2, 0, (void*)0);
 	VertexAttribPointer(program, "color", 3, 0, (void*)vsize);
+	
+	//mat4 view = Translate(tranNew.x, tranNew.y, 0) * RotateY(rotNew.x) * RotateX(rotNew.y) * RotateZ(rotZ);
+	float dt = (float)(clock() - startTime) / CLOCKS_PER_SEC;
+	SetUniform(program, "radAng", (3.1415f / 180.f) * dt * degPerSec);
+
+	//mat4 view = RotateZ(30 * dt);
+	mat4 view = RotateY(rotNew.x)*RotateX(rotNew.y);
+	SetUniform(program, "view", view);
+
 	glDrawElements(GL_TRIANGLES, 3 * ntris, GL_UNSIGNED_INT, &triangles[0]);
 	glFlush();
 }
@@ -144,6 +218,13 @@ int main() {
 	if (!(program = LinkProgramViaCode(&vertexShader, &pixelShader)))
 		return 0;
 	InitVertexBuffer();
+
+
+	glfwSetCursorPosCallback(window, MouseMove);
+	//callback mouse registration
+	glfwSetMouseButtonCallback(window, MouseButton);
+
+
 	glfwSetKeyCallback(window, Keyboard);
 	glfwSwapInterval(1);
 	while (!glfwWindowShouldClose(window)) {
