@@ -1,0 +1,244 @@
+
+#include <glad.h>
+#include <GLFW/glfw3.h>
+#include <stdio.h>
+#include "GLXtras.h"
+#include <vector>
+#include <Mesh.h>
+#include <Camera.h>
+#include <Widgets.h>
+#include "Misc.h"
+#include "STB_Image.h"
+
+
+
+//obj file path 
+const char* objFilename = "C:/Users/loc/Downloads/Rose.obj";
+const char* texFilename = "C:/Users/loc/Downloads/Rose.tga";
+int textureId = -1;
+
+int winW = 400, winH = 400;
+Camera camera((float)winW / winH, vec3(0, 0, 0), vec3(0, 0, -5));
+
+// Application Data
+vector<vec3> points; // 3D mesh vertices
+vector<int3> triangles; // triplets of vertex indices
+vector<vec3> normals;
+vector<vec2> uvs;
+
+GLuint vBuffer = 0;   // GPU vertex buffer ID
+GLuint program = 0;   // GLSL program ID
+
+// Shaders: vertex shader with view transform, trivial pixel shader
+
+const char* vertexShader = R"(
+	#version 130
+	in vec3 point, normal;
+     in vec2 uv;
+	out vec3 vPoint, vNormal;
+  out vec2 vUv;
+	uniform mat4 modelview, persp;
+	void main() {
+         vUv = uv;
+		vPoint = (modelview*vec4(point, 1)).xyz;
+		vNormal = (modelview*vec4(normal, 0)).xyz;
+		gl_Position = persp*vec4(vPoint, 1);
+	}
+)";
+
+const char* pixelShader = R"(
+	#version 130
+	in vec3 vPoint, vNormal;
+in vec2 vUv;
+	uniform vec3 light = vec3(1, 0, 0);
+	//uniform vec3 color = vec3(1, 1, 1);
+ uniform sampler2D textureImage;
+	uniform float amb = .05, dif = .7, spc = .5;  // lighting coefficients
+	out vec4 pColor;
+	void main() {
+
+		vec3 N = normalize(vNormal);          // surface normal
+		vec3 L = normalize(light-vPoint);     // light vector
+		vec3 E = normalize(vPoint);           // eye vector
+		vec3 R = reflect(L, N);               // highlight vector
+		float d = dif*max(0, dot(N, L));      // one-sided Lambert
+		float h = max(0, dot(R, E));          // highlight term
+		float s = spc*pow(h, 100);            // specular term
+		float intensity = clamp(amb+d+s, 0, 1);
+vec3 color = texture(textureImage, vUv).rgb;
+		pColor = vec4(intensity*color, 1);
+	}
+)";
+
+// Initialization
+
+void InitVertexBuffer() {
+    // create GPU vertex buffer
+    int nPts = points.size(), nNrms = normals.size(), nUvs = uvs.size();
+    int sizePts = nPts * sizeof(vec3), sizeNrms = nNrms * sizeof(vec3), sizeUvs = nUvs * sizeof(vec2);
+    glBufferData(GL_ARRAY_BUFFER, sizePts + sizeNrms + sizeUvs, NULL, GL_STATIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizePts, points.data());
+    glBufferSubData(GL_ARRAY_BUFFER, sizePts, sizeNrms, normals.data());
+    glBufferSubData(GL_ARRAY_BUFFER, sizePts + sizeNrms, sizeUvs, uvs.data()); 
+}
+
+// Interaction
+
+vec2  mouseDown;            // reference for mouse drag
+vec2  rotOld, rotNew;       // .x is rotation about Y-axis, .y about X-axis
+float rotZ = 0;
+vec2  tranOld, tranNew;
+float rotSpeed = .3f, tranSpeed = .01f;
+
+
+
+bool Shift(GLFWwindow* w) {
+    return glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+        glfwGetKey(w, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+}
+
+
+
+void MouseButton(GLFWwindow* w, int butn, int action, int mods) {
+    double x, y;
+    glfwGetCursorPos(w, &x, &y);
+    y = winH - y;
+    // called when mouse button pressed or released
+    if (action == GLFW_PRESS)
+        camera.MouseDown((int)x, (int)y); // save reference for MouseDrag
+    if (action == GLFW_RELEASE)
+        camera.MouseUp();                   // save reference for MouseDrag
+
+}
+
+
+
+void MouseMove(GLFWwindow* w, double x, double y) {
+    if (glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) { // drag
+        y = winH - y;
+        camera.MouseDrag((int)x, (int)y, Shift(w));
+    }
+}
+
+
+
+void MouseWheel(GLFWwindow* w, double ignore, double spin) {
+    camera.MouseWheel(spin > 0, Shift(w));
+}
+
+// Application
+
+void Display() {
+
+    glClearColor(.5f, .5f, .5f, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+
+    glUseProgram(program);
+   
+    SetUniform(program, "modelview", camera.modelview);
+    SetUniform(program, "persp", camera.persp);
+    // clear screen to grey
+   
+    //glBindBuffer(GL_ARRAY_BUFFER, vBuffer);
+    
+    VertexAttribPointer(program, "point", 3, 0, (void*)0);
+    VertexAttribPointer(program, "normal", 3, 0, (void*)(points.size() * sizeof(vec3)));
+
+    //int sizePts = points.size() * sizeof(vec3);
+    
+    // update view transformation
+    //mat4 view = Translate(tranNew.x, tranNew.y, 0) * RotateY(rotNew.x) * RotateX(rotNew.y) * RotateZ(rotZ);
+  
+    int pSize = points.size() * sizeof(vec3), nSize = normals.size() * sizeof(vec3);
+    VertexAttribPointer(program, "uv", 2, 0, (void*)(pSize + nSize));
+    SetUniform(program, "textureImage", 0);
+	glBindTexture(GL_TEXTURE_2D, textureId);
+	glActiveTexture(GL_TEXTURE0+0);
+
+    for (int i = 0; i < (int)triangles.size(); i++)
+    {
+        glDrawElements(GL_TRIANGLES, 3 * triangles.size(), GL_UNSIGNED_INT, &triangles[0]);
+
+    }
+    glFlush();
+}
+
+
+
+void Resize(GLFWwindow* window, int width, int height) {
+    camera.Resize(winW = width, winH = height);
+    glViewport(0, 0, winW, winH);
+}
+
+
+void Close() {
+    // unbind vertex buffer, free GPU memory
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDeleteBuffers(1, &vBuffer);
+}
+
+void ErrorGFLW(int id, const char* reason) {
+    printf("GFLW error %i: %s\n", id, reason);
+}
+
+void Keyboard(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+}
+
+
+
+int main() {
+    // init app window and GL context
+    glfwInit();
+    glfwWindowHint(GLFW_SAMPLES, 4); // anti-alias
+    GLFWwindow* w = glfwCreateWindow(winW, winH, " smooth, shiny surface", NULL, NULL);
+    glfwSetWindowPos(w, 100, 100);
+    glfwMakeContextCurrent(w);
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+    // init shader and GPU data
+   
+    textureId = LoadTexture((char*)texFilename, 0);
+
+    if (!ReadAsciiObj((char*)objFilename, points, triangles, &normals,&uvs)) {
+        printf("failed to read obj file\n");
+        getchar();
+    }
+
+    printf("%i vertices, %i triangles, %i normals\n", points.size(), normals.size(), triangles.size());
+    Normalize(points, .8f); // scale/move model to uniform +/-1 space
+    
+    program = LinkProgramViaCode(&vertexShader, &pixelShader);
+
+    glGenBuffers(1, &vBuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, vBuffer);
+    int vsize = points.size() * sizeof(vec3);
+    glBufferData(GL_ARRAY_BUFFER,points.size()*sizeof(vec3),&points[0],GL_STATIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vsize, (void*)(&points[0]));
+    glBufferSubData(GL_ARRAY_BUFFER, vsize, vsize, (void*)(&normals[0]));
+    glfwSetCursorPosCallback(w, MouseMove);
+    glfwSetMouseButtonCallback(w, MouseButton);
+    glfwSetScrollCallback(w, MouseWheel);
+    glfwSetWindowSizeCallback(w, Resize);
+
+    InitVertexBuffer();
+    // callbacks
+    // event loop
+    while (!glfwWindowShouldClose(w)) {
+        Display();
+        glfwPollEvents();
+        glfwSwapBuffers(w);
+    }
+  
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDeleteBuffers(1, &vBuffer);
+    glfwDestroyWindow(w);
+    glfwTerminate();
+}
+
+
+
